@@ -1,0 +1,77 @@
+name: Send Log Email
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - log.txt
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get newly appended text
+        id: new_text
+        shell: bash
+        run: |
+          OLD_SHA="${{ github.event.before }}"
+          NEW_SHA="${{ github.sha }}"
+
+          git show "$OLD_SHA:log.txt" > /tmp/old_log.txt 2>/dev/null || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = Path("/tmp/old_log.txt").read_text(encoding="utf-8") \
+                if Path("/tmp/old_log.txt").exists() else ""
+
+          new = Path("log.txt").read_text(encoding="utf-8")
+
+          if new.startswith(old):
+              appended = new[len(old):]
+          else:
+              appended = new
+
+          Path("/tmp/appended.txt").write_text(
+              appended,
+              encoding="utf-8"
+          )
+          PY
+
+          {
+            echo "text<<EOF"
+            cat /tmp/appended.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Send email
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "New ManySet Message"
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_FROM }}
+          body: |
+            A new message was added to log.txt.
+
+            --------------------------------
+
+            ${{ steps.new_text.outputs.text }}
+
+            --------------------------------
+
+            Repository:
+            https://github.com/indikatest/mypub
+
+            File:
+            log.txt
